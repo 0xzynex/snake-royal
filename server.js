@@ -106,7 +106,8 @@ class Room {
       if (!ok) continue;
       for (const s of this.snakes.values()) if (s.alive) { const h = s.body[0]; if (Math.abs(h % W - x) + Math.abs((h / W | 0) - y) < 8) ok = false; }
       if (!ok) continue;
-      const d = Math.random() * 4 | 0, [ddx, ddy] = DIRS[d];
+      const cxd = W / 2 - x, cyd = H / 2 - y; // start heading toward the middle, never into a wall
+      const d = Math.abs(cxd) > Math.abs(cyd) ? (cxd > 0 ? 1 : 3) : (cyd > 0 ? 2 : 0), [ddx, ddy] = DIRS[d];
       const body = []; for (let i = 0; i < len; i++) body.push(cell(x - ddx * i, y - ddy * i));
       if (body.some(c => occ.has(c))) continue;
       return { body, dir: d };
@@ -290,6 +291,7 @@ wss.on("connection", ws => {
     } else if (m.t === "d" && me.alive) {
       const d = m.d | 0; if (d >= 0 && d < 4 && me.queue.length < 3) me.queue.push(d);
     } else if (m.t === "b") { me.boost = !!m.on; }
+    else if (m.t === "p" && typeof m.ts === "number") send(ws, { t: "p", ts: m.ts });
   });
   ws.on("close", () => {
     onlineCount--; clearInterval(reset); room.clients.delete(ws);
