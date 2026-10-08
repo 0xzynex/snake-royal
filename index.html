@@ -126,7 +126,7 @@ body:not(.embed) .embedOnly{display:none}
       <div class="ov" id="startOv">
         <form class="box" id="startForm">
           <h1>Snake Royale</h1>
-          <p>Everyone online plays in one arena. Eat to grow. Make other snakes crash into you. Longest snake of the day tops the board.</p>
+          <p>Everyone online plays together, up to 20 per arena. Eat to grow. Make other snakes crash into you. Longest snake of the day tops the board.</p>
           <div class="row">
             <input id="nick" maxlength="14" placeholder="nickname" autocomplete="off" spellcheck="false" aria-label="Nickname">
             <button class="go" type="submit">Play</button>
@@ -247,9 +247,11 @@ function applyFull(m){
   for(let i=0;i<m.food.length;i+=2) food.set(m.food[i], m.food[i+1]);
 }
 function applyDelta(m){
-  for(const e of m.sn){
-    if(e.gone){ snakes.delete(e.i); continue; }
-    if(e.cells){ setSnake(e); continue; }
+  const list = [];
+  if(m.g) for(const id of m.g) snakes.delete(id);
+  if(m.fu) for(const e of m.fu) setSnake(e);
+  for(let i=0, d=m.d; i<d.length;){ const id=d[i++], fl=d[i++], k=d[i++], cut=d[i++], n=d[i++]; list.push({i:id, a:fl&1, b:fl&2, k, cut, add:d.slice(i,i+n)}); i+=n; }
+  for(const e of list){
     const s = snakes.get(e.i); if(!s) continue;
     s.b = !!e.b; s.k = e.k;
     if(s.a && !e.a){ burst(s.cells, COLORS[s.c], 24); if(s.i===myId){ shake=.35; } s.cells=[]; s.a=false; s.wasAlive=false; continue; }
@@ -308,6 +310,7 @@ function connect(){
     else if(m.t==="board"){ board = m.board; renderBoard(); }
     else if(m.t==="nick"){ store.set("snakeNick", m.nick); $("nick").value = m.nick; if(m.blocked) feedLine(`That nickname isn’t allowed. You’re ${m.nick}`); }
     else if(m.t==="full"){ feedLine("Arena is crowded, trying again…"); setTimeout(play, 800); }
+    else if(m.t==="busy"){ retry = 6000; feedLine("So many players right now. Reconnecting in a few seconds…"); }
   };
   ws.onclose = ()=>{ $("online").textContent = "reconnecting…"; setTimeout(connect, retry); retry = Math.min(8000, retry*1.6); };
 }
@@ -319,6 +322,7 @@ function play(){
 }
 function showDead(m){
   playing = false; boostOn(false);
+  { const me = snakes.get(myId); if(me && me.cells.length){ burst(me.cells, COLORS[me.c], 24); me.cells = []; me.a = false; } shake = .35; }
   $("deadTitle").textContent = m.by ? `Eaten by ${m.by}` : m.how==="wall" ? "You hit the wall" : m.how==="self" ? "You bit your own tail" : "You crashed";
   $("deadLen").textContent = m.len; $("deadKills").textContent = m.kills;
   const nick = (store.get("snakeNick")||"").toLowerCase();
@@ -436,7 +440,8 @@ function frame(now){
   // HUD
   if(me && me.a){
     const rank = [...snakes.values()].filter(s=>s.a).sort((a,b)=>b.cells.length-a.cells.length).indexOf(me)+1;
-    $("hudL").textContent = `LEN ${me.cells.length} · KILLS ${me.k} · #${rank} HERE`;
+    const alone = [...snakes.values()].filter(s=>s.a).length===1;
+    $("hudL").textContent = alone ? `LEN ${me.cells.length} · alone here, send the link to a friend` : `LEN ${me.cells.length} · KILLS ${me.k} · #${rank} HERE`;
   } else $("hudL").textContent = "";
   $("online").textContent = `${online} online`;
   $("hudOnline").textContent = EMBED ? `${online} online` : "";
