@@ -71,6 +71,8 @@ const ROOTS = ["nigg", "faggot", "retard", "hitler", "cunt", "fuck", "whore", "r
 const WORDS = ["fag", "fags", "nazi", "nazis", "shit", "rape", "negro", "негр", "сука", "суки", "сучка", "еба", "ебал", "ебло", "ебу", "ебать", "ёб"];
 const ADJ = ["Swift", "Lucky", "Quiet", "Brave", "Tiny", "Neon", "Lazy", "Wild", "Frosty", "Sunny", "Sly", "Hungry"];
 const ANIMAL = ["Otter", "Comet", "Fox", "Owl", "Panda", "Gecko", "Moth", "Koala", "Lynx", "Wren", "Yak", "Crab"];
+const HANDLES = ["mike", "sara", "dasha", "leo", "kira", "jay", "nina", "max", "tom", "lucas", "emma", "yuki", "ivan", "zoe", "ash", "remy", "sol", "kai"];
+const botNick = () => Math.random() < .5 ? randomNick() : HANDLES[Math.random() * HANDLES.length | 0] + (Math.random() < .6 ? (Math.random() * 900 + 10 | 0) : "");
 const randomNick = () => ADJ[Math.random() * ADJ.length | 0] + ANIMAL[Math.random() * ANIMAL.length | 0] + (Math.random() * 90 + 10 | 0);
 function cleanNick(raw) {
   const s = String(raw || "").normalize("NFKC").replace(/[^\p{L}\p{N} _\-.]/gu, "").replace(/\s+/g, " ").trim().slice(0, 14);
@@ -136,10 +138,47 @@ class Room {
     else this.ev(how === "wall" ? `${s.nick} hit the wall` : how === "self" ? `${s.nick} bit their own tail` : `${s.nick} crashed`);
     if (!s.bot) { submit(s.nick, s.best, s.kills); if (s.ws) send(s.ws, { t: "dead", len: s.best, kills: s.kills, by: killer && killer !== s ? killer.nick : null, how }); }
   }
+  // Computer players fill quiet arenas. They are deliberately weak: short-sighted, slow to react,
+  // never boost, and sometimes careless. They never reach the leaderboard or the online count.
+  botThink(s, occ) {
+    const h = s.body[0], hx = h % W, hy = h / W | 0;
+    const blocked = (x, y) => x < 0 || y < 0 || x >= W || y >= H || occ.has(cell(x, y));
+    s.boost = false;
+    if (s.react > 0) {
+      s.react--;
+      const ax = hx + DIRS[s.dir][0], ay = hy + DIRS[s.dir][1];
+      if (!blocked(ax, ay) || Math.random() < .2) return; // keep going, or don't notice in time
+    }
+    s.react = 1 + (Math.random() * 3 | 0);
+    let tx, ty;
+    let best = null, bd = 13;
+    if (s.body.length < 28) for (const c of this.food.keys()) { const d = Math.abs(c % W - hx) + Math.abs((c / W | 0) - hy); if (d < bd) { bd = d; best = c; } }
+    if (best !== null) { tx = best % W; ty = best / W | 0; }
+    else { if (!s.wander || Math.random() < .05) s.wander = [4 + Math.random() * (W - 8) | 0, 4 + Math.random() * (H - 8) | 0]; [tx, ty] = s.wander; }
+    let pick = s.dir, ps = -1e9;
+    for (let d = 0; d < 4; d++) {
+      if ((d + 2) % 4 === s.dir) continue;
+      const nx = hx + DIRS[d][0], ny = hy + DIRS[d][1];
+      if (blocked(nx, ny)) continue;
+      const sc = -(Math.abs(tx - nx) + Math.abs(ty - ny)) + Math.random() * 3 + (d === s.dir ? 1 : 0);
+      if (sc > ps) { ps = sc; pick = d; }
+    }
+    if (pick !== s.dir) s.queue = [pick];
+  }
   step() {
     this.k++;
     const now = Date.now();
-    let occ;
+    const want = Math.max(0, 5 - this.clients.size);
+    let bots = 0; for (const s of this.snakes.values()) if (s.bot) bots++;
+    if (bots < want && this.k % 5 === 0) { const b = { id: nextId++, nick: botNick(), color: Math.random() * COLORS | 0, bot: true }; if (this.spawn(b)) this.snakes.set(b.id, b); }
+    for (const s of [...this.snakes.values()]) {
+      if (s.bot && !s.alive && now - s.deadAt > 3000) {
+        if (bots > want) { this.snakes.delete(s.id); this.gone.push(s.id); bots--; }
+        else { s.nick = botNick(); s.color = Math.random() * COLORS | 0; this.spawn(s); }
+      }
+    }
+    let occ = this.occupied();
+    for (const s of this.snakes.values()) if (s.bot && s.alive) this.botThink(s, occ);
     for (const s of this.snakes.values()) { s.add = s.add || []; }
     // two sub-steps: everyone moves once, boosting snakes move twice
     for (let sub = 0; sub < 2; sub++) {
@@ -184,7 +223,7 @@ class Room {
     if (now > this.goldenAt && golden === 0) { this.addFood(2); this.goldenAt = now + 20000; this.ev("A golden apple appeared"); }
     this.broadcast();
   }
-  snakeFull(s) { return { i: s.id, n: s.nick, c: s.color, bot: s.bot ? 1 : 0, a: s.alive ? 1 : 0, b: s.boost ? 1 : 0, k: s.kills, cells: s.alive ? s.body : [] }; }
+  snakeFull(s) { return { i: s.id, n: s.nick, c: s.color, a: s.alive ? 1 : 0, b: s.boost ? 1 : 0, k: s.kills, cells: s.alive ? s.body : [] }; }
   fullMsg() {
     return { t: "f", k: this.k, sn: [...this.snakes.values()].filter(s => s.body).map(s => this.snakeFull(s)), food: [...this.food].flat(), on: onlineCount };
   }
