@@ -302,7 +302,10 @@ function connect(){
   ws.onopen = ()=>{ retry = 800; };
   ws.onmessage = ev=>{
     let m; try{ m = JSON.parse(ev.data); }catch(e){ return; }
-    if(m.t==="s"){ applyDelta(m); lastTick = performance.now(); if(m.ev) m.ev.forEach(feedLine); online=m.on; }
+    if(m.t==="s"){ applyDelta(m); lastTick = performance.now(); if(m.ev) m.ev.forEach(feedLine); online=m.on;
+      const me = snakes.get(myId);
+      if(!me || !me.a || serverDir(me)===pendingDir || performance.now()-pendingAt > 450) pendingDir = null; }
+    else if(m.t==="p"){ rtt = Math.round(performance.now()-m.ts); }
     else if(m.t==="f"){ applyFull(m); lastTick = performance.now(); if(m.ev) m.ev.forEach(feedLine); online=m.on; }
     else if(m.t==="hi"){ myId=m.id; W=m.w; H=m.h; TICK=m.tick; roomN=m.room; board=m.board; applyFull(m); resize(); renderBoard(); if(playing) play(); }
     else if(m.t==="spawned"){ myId = m.id; $("startOv").hidden = true; $("deadOv").hidden = true; }
@@ -315,6 +318,7 @@ function connect(){
   ws.onclose = ()=>{ $("online").textContent = "reconnecting…"; setTimeout(connect, retry); retry = Math.min(8000, retry*1.6); };
 }
 function play(){
+  pendingDir = null;
   const n = $("nick").value.trim();
   if(n) store.set("snakeNick", n);
   playing = true; lastDir = -1; audio();
@@ -338,7 +342,16 @@ function showDead(m){
 
 /* ---------- input ---------- */
 let lastDir = -1, boosting = false;
-function turn(d){ const me = snakes.get(myId); if(!me || !me.a || d===lastDir) return; lastDir = d; send({t:"d", d}); }
+// Own-snake prediction: the head turns on screen the moment you press, the server confirms a tick later.
+const DV = [[0,-1],[1,0],[0,1],[-1,0]];
+let pendingDir = null, pendingAt = 0, rtt = null;
+function serverDir(s){ if(!s || s.cells.length<2) return null; const dx=cx(s.cells[0])-cx(s.cells[1]), dy=cy(s.cells[0])-cy(s.cells[1]); const i = DV.findIndex(v=>v[0]===dx&&v[1]===dy); return i<0?null:i; }
+function turn(d){
+  const me = snakes.get(myId); if(!me || !me.a) return;
+  const cur = pendingDir ?? serverDir(me);
+  if(d===cur || (cur!=null && (d+2)%4===cur)) return;
+  pendingDir = d; pendingAt = performance.now(); lastDir = d; send({t:"d", d});
+}
 function boostOn(on){ if(on===boosting) return; boosting = on; send({t:"b", on}); }
 const KEYS = {ArrowUp:0,KeyW:0,ArrowRight:1,KeyD:1,ArrowDown:2,KeyS:2,ArrowLeft:3,KeyA:3};
 addEventListener("keydown", e=>{
@@ -376,9 +389,21 @@ function drawSnake(s, t, isMe){
   const cells = s.cells; if(!cells.length) return;
   const pts = [];
   const h0 = cells[0], h1 = cells.length>1 ? cells[1] : h0;
-  if(s.moved && cells.length>1) pts.push([lerp(cx(h1),cx(h0),t), lerp(cy(h1),cy(h0),t)]); else pts.push([cx(h0),cy(h0)]);
-  for(let i=1;i<cells.length;i++) pts.push([cx(cells[i]), cy(cells[i])]);
-  if(s.prevTail!=null){ const last = cells[cells.length-1]; pts.push([lerp(cx(s.prevTail),cx(last),t), lerp(cy(s.prevTail),cy(last),t)]); }
+  let eyeDir = null;
+  const nd = isMe ? (pendingDir ?? serverDir(s)) : null;
+  const nx = nd!=null ? cx(h0)+DV[nd][0] : -1, ny = nd!=null ? cy(h0)+DV[nd][1] : -1;
+  if(isMe && nd!=null && nx>=0 && ny>=0 && nx<W && ny<H && cells.length>2){
+    // draw one step ahead in the direction you are steering
+    pts.push([lerp(cx(h0),nx,t), lerp(cy(h0),ny,t)]);
+    for(let i=0;i<cells.length-1;i++) pts.push([cx(cells[i]), cy(cells[i])]);
+    const a = cells[cells.length-1], b = cells[cells.length-2];
+    pts.push([lerp(cx(a),cx(b),t), lerp(cy(a),cy(b),t)]);
+    eyeDir = DV[nd];
+  } else {
+    if(s.moved && cells.length>1) pts.push([lerp(cx(h1),cx(h0),t), lerp(cy(h1),cy(h0),t)]); else pts.push([cx(h0),cy(h0)]);
+    for(let i=1;i<cells.length;i++) pts.push([cx(cells[i]), cy(cells[i])]);
+    if(s.prevTail!=null){ const last = cells[cells.length-1]; pts.push([lerp(cx(s.prevTail),cx(last),t), lerp(cy(s.prevTail),cy(last),t)]); }
+  }
   const P = p => [(p[0]+.5)*CELL, (p[1]+.5)*CELL];
   ctx.lineJoin = "round"; ctx.lineCap = "round";
   const path = ()=>{ ctx.beginPath(); const a=P(pts[0]); ctx.moveTo(a[0],a[1]); for(let i=1;i<pts.length;i++){ const b=P(pts[i]); ctx.lineTo(b[0],b[1]); } };
@@ -391,7 +416,7 @@ function drawSnake(s, t, isMe){
   for(let i=2;i<pts.length-1;i+=2){ const p=P(pts[i]); ctx.fillRect(p[0]-CELL*.12, p[1]-CELL*.12, CELL*.24, CELL*.24); }
   // head + eyes
   const hp = P(pts[0]);
-  const d = cells.length>1 ? [cx(h0)-cx(h1), cy(h0)-cy(h1)] : [1,0];
+  const d = eyeDir || (cells.length>1 ? [cx(h0)-cx(h1), cy(h0)-cy(h1)] : [1,0]);
   ctx.fillStyle = COLORS[s.c]; ctx.strokeStyle = "#27321d"; ctx.lineWidth = Math.max(1, CELL*.12);
   ctx.beginPath(); ctx.arc(hp[0], hp[1], CELL*.46, 0, Math.PI*2); ctx.fill(); ctx.stroke();
   const px = -d[1], py = d[0];
@@ -443,12 +468,14 @@ function frame(now){
     const alone = [...snakes.values()].filter(s=>s.a).length===1;
     $("hudL").textContent = alone ? `LEN ${me.cells.length} · alone here, send the link to a friend` : `LEN ${me.cells.length} · KILLS ${me.k} · #${rank} HERE`;
   } else $("hudL").textContent = "";
-  $("online").textContent = `${online} online`;
-  $("hudOnline").textContent = EMBED ? `${online} online` : "";
+  const ping = rtt!=null ? ` · ${rtt} ms` : "";
+  $("online").textContent = `${online} online${ping}`;
+  $("hudOnline").textContent = EMBED ? `${online} online${ping}` : "";
   liveT -= dt; if(liveT<=0){ liveT = .5; if(!EMBED) renderLive(); }
   requestAnimationFrame(frame);
 }
 resize(); renderBoard(); connect(); requestAnimationFrame(frame);
+setInterval(()=>send({t:"p", ts: performance.now()}), 2000);
 })();
 </script>
 </body>
