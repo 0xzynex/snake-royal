@@ -1,0 +1,450 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Snake Royale</title>
+<!--META-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Silkscreen:wght@400;700&family=DM+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: an old LCD handheld screen as the arena, set in a dark olive shell; side rail for the live arena and the daily board */
+:root{
+  --shell:#151a12;
+  --panel:#1e2519;
+  --edge:#35412b;
+  --ink:#e8eed6;
+  --muted:#97a585;
+  --lcd:#c5d19c;
+  --lcd-dot:#b3c087;
+  --lcd-ink:#27321d;
+  --amber:#f2c14e;
+  --hot:#e4572e;
+  --f-display:"Silkscreen","Courier New",monospace;
+  --f-text:"DM Mono",ui-monospace,Menlo,Consolas,monospace;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{margin:0;height:100%}
+body{background:var(--shell);color:var(--ink);font-family:var(--f-text);font-size:14px;-webkit-user-select:none;user-select:none}
+.app{min-height:100%;display:grid;grid-template-rows:auto 1fr auto;gap:14px;padding:14px 16px max(14px,env(safe-area-inset-bottom))}
+.top{display:flex;align-items:center;gap:14px;flex-wrap:wrap;max-width:1240px;width:100%;margin-inline:auto}
+.logo{font-family:var(--f-display);font-weight:700;font-size:26px;letter-spacing:.02em;line-height:1}
+.logo span{color:var(--amber)}
+.pill{font-size:12px;color:var(--muted);border:1px solid var(--edge);border-radius:20px;padding:4px 10px;display:inline-flex;gap:6px;align-items:center}
+.dot{width:7px;height:7px;border-radius:50%;background:#7bd389}
+.grow{flex:1}
+.top .best{font-size:12px;color:var(--muted)}
+.top .best b{color:var(--amber);font-weight:500}
+.iconbtn{font:12px var(--f-text);color:var(--muted);background:none;border:1px solid var(--edge);border-radius:4px;padding:5px 9px;cursor:pointer}
+
+.main{display:grid;grid-template-columns:minmax(0,1fr) 270px;gap:16px;max-width:1240px;width:100%;margin-inline:auto;align-items:start}
+.stage{position:relative;min-width:0;display:grid;place-items:center;background:#0f130c;border:1px solid var(--edge);border-radius:10px;padding:12px;aspect-ratio:16/9;max-width:100%}
+.screen{position:relative}
+#cv{display:block;image-rendering:pixelated;border-radius:3px;touch-action:none}
+.side{display:grid;gap:14px;min-width:0}
+.card{background:var(--panel);border:1px solid var(--edge);border-radius:8px;padding:12px;display:grid;gap:8px;min-width:0}
+.card h3{flex-wrap:wrap;gap:6px;margin:0;font-family:var(--f-display);font-size:13px;font-weight:400;letter-spacing:.06em;color:var(--muted);display:flex;justify-content:space-between;align-items:center}
+.tabs{display:flex;gap:4px}
+.tabs button{font:11px var(--f-text);color:var(--muted);background:none;border:none;border-radius:12px;padding:3px 8px;cursor:pointer}
+.tabs button.on{background:var(--ink);color:var(--shell)}
+.list{display:grid;font-size:12.5px}
+.list .r{display:grid;grid-template-columns:20px 10px minmax(0,1fr) auto;gap:8px;align-items:center;padding:5px 0;border-bottom:1px solid rgba(151,165,133,.12)}
+.list .r:last-child{border-bottom:none}
+.list .rk{color:var(--muted);font-variant-numeric:tabular-nums}
+.list .sw{width:10px;height:10px;border-radius:2px}
+.list .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.list .nm i{font-style:normal;font-size:10px;color:var(--muted);margin-left:5px;letter-spacing:.06em}
+.list .v{font-family:var(--f-display);font-variant-numeric:tabular-nums}
+.list .me{color:var(--amber)}
+.empty{font-size:12px;color:var(--muted);line-height:1.5}
+.help{max-width:1240px;width:100%;margin-inline:auto;font-size:12px;color:var(--muted);display:flex;gap:18px;flex-wrap:wrap}
+.help kbd{font-family:var(--f-display);color:var(--ink);font-size:11px}
+
+/* overlays on the arena */
+.hud{position:absolute;pointer-events:none;font-family:var(--f-display);color:var(--lcd-ink);font-size:13px}
+#hudL{left:10px;top:8px}
+#hudR{right:10px;top:8px;text-align:right;pointer-events:auto}
+#hudR a{color:var(--lcd-ink);text-decoration:none;border:1px solid rgba(39,50,29,.4);padding:2px 6px;border-radius:3px;background:rgba(197,209,156,.7)}
+#feed{position:absolute;left:10px;bottom:8px;display:grid;gap:2px;pointer-events:none;font-size:12px;font-family:var(--f-text);color:var(--lcd-ink)}
+#feed div{background:rgba(197,209,156,.82);padding:1px 6px;border-radius:2px;transition:opacity .6s}
+.ov{position:absolute;inset:0;display:grid;place-items:center;background:rgba(197,209,156,.72);border-radius:3px;backdrop-filter:blur(1px)}
+.box{display:grid;gap:12px;justify-items:center;text-align:center;color:var(--lcd-ink);padding:16px;max-width:520px}
+.box h1{margin:0;font-family:var(--f-display);font-weight:700;font-size:clamp(28px,5.5vw,52px);line-height:.95}
+.box h2{margin:0;font-family:var(--f-display);font-weight:700;font-size:clamp(22px,4vw,36px);line-height:1}
+.box p{margin:0;font-size:13px;line-height:1.5;max-width:44ch}
+.row{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;align-items:center}
+.box input{font:15px var(--f-display);width:190px;padding:9px 10px;border:2px solid var(--lcd-ink);border-radius:3px;background:#e3ead0;color:var(--lcd-ink);-webkit-user-select:text;user-select:text}
+.box input:focus{outline:3px solid var(--amber);outline-offset:1px}
+.go{font:700 18px var(--f-display);padding:10px 22px;border:2px solid var(--lcd-ink);border-radius:3px;background:var(--lcd-ink);color:var(--lcd);cursor:pointer;box-shadow:0 4px 0 rgba(39,50,29,.35)}
+.go:active{transform:translateY(2px);box-shadow:0 2px 0 rgba(39,50,29,.35)}
+.ghost{font:13px var(--f-text);padding:9px 14px;border:2px solid var(--lcd-ink);border-radius:3px;background:transparent;color:var(--lcd-ink);cursor:pointer;text-decoration:none}
+button:focus-visible,a:focus-visible{outline:3px solid var(--amber);outline-offset:2px}
+.swatches{display:flex;gap:5px}
+.swatches button{width:20px;height:20px;border-radius:3px;border:2px solid transparent;cursor:pointer;padding:0}
+.swatches button.on{border-color:var(--lcd-ink);transform:scale(1.15)}
+.stat{display:flex;gap:22px;font-family:var(--f-display)}
+.stat div{display:grid;gap:2px}
+.stat b{font-size:30px}
+.stat span{font-size:10px;letter-spacing:.1em}
+.small{font-size:11px;opacity:.8}
+
+/* embed: the whole frame is the arena */
+body.embed .app{padding:0;gap:0;grid-template-rows:1fr;height:100%}
+body.embed .top, body.embed .side, body.embed .help{display:none}
+body.embed .main{grid-template-columns:1fr;max-width:none;height:100%}
+body.embed .stage{border:none;border-radius:0;padding:0;aspect-ratio:auto;height:100%;width:100%;background:var(--lcd)}
+body.embed .screen{margin:auto}
+body.embed .box{gap:9px;padding:10px}
+body.embed .box p{font-size:12px}
+body:not(.embed) .embedOnly{display:none}
+
+@media (max-width:860px){ .main{grid-template-columns:1fr} }
+@media (prefers-reduced-motion:reduce){ #feed div{transition:none} }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <div class="logo">Snake <span>Royale</span></div>
+    <span class="pill"><span class="dot"></span><span id="online">connecting…</span></span>
+    <span class="grow"></span>
+    <span class="best" id="topBest"></span>
+    <button class="iconbtn" id="muteBtn" type="button">Sound: on</button>
+  </header>
+
+  <main class="main">
+    <section class="stage" id="stage">
+      <div class="screen" id="screen">
+      <canvas id="cv" aria-label="Snake arena"></canvas>
+      <div class="hud" id="hudL"></div>
+      <div class="hud" id="hudR"><span id="hudOnline"></span> <a class="embedOnly" id="fullLink" href="/" target="_blank" rel="noopener">full game ↗</a></div>
+      <div id="feed"></div>
+
+      <div class="ov" id="startOv">
+        <form class="box" id="startForm">
+          <h1>Snake Royale</h1>
+          <p>Everyone online plays in one arena. Eat to grow. Make other snakes crash into you. Longest snake of the day tops the board.</p>
+          <div class="row">
+            <input id="nick" maxlength="14" placeholder="nickname" autocomplete="off" spellcheck="false" aria-label="Nickname">
+            <button class="go" type="submit">Play</button>
+          </div>
+          <div class="swatches" id="swatches" aria-label="Snake color"></div>
+          <p class="small" id="ctrlHint">Arrows or WASD to turn · hold Space to boost</p>
+        </form>
+      </div>
+
+      <div class="ov" id="deadOv" hidden>
+        <div class="box">
+          <h2 id="deadTitle">Eaten</h2>
+          <div class="stat"><div><b id="deadLen">0</b><span>LENGTH</span></div><div><b id="deadKills">0</b><span>KILLS</span></div><div><b id="deadRank">–</b><span>TODAY</span></div></div>
+          <div class="row">
+            <button class="go" id="againBtn" type="button">Play again</button>
+            <a class="ghost" id="shareBtn" href="#" target="_blank" rel="noopener">Post on X</a>
+          </div>
+          <p class="small">Space or Enter to play again</p>
+        </div>
+      </div>
+      </div>
+    </section>
+
+    <aside class="side">
+      <div class="card">
+        <h3>This arena <span id="arenaN"></span></h3>
+        <div class="list" id="live"></div>
+      </div>
+      <div class="card">
+        <h3>Longest <div class="tabs"><button type="button" data-tab="today" class="on">today</button><button type="button" data-tab="all">all time</button></div></h3>
+        <div class="list" id="board"></div>
+      </div>
+    </aside>
+  </main>
+
+  <footer class="help">
+    <span><kbd>← ↑ → ↓</kbd> / <kbd>WASD</kbd> turn</span>
+    <span><kbd>Space</kbd> hold to boost (costs length)</span>
+    <span>Golden apple = +5</span>
+    <span>Phone: swipe to turn, hold to boost</span>
+  </footer>
+</div>
+
+<script>
+(() => {
+"use strict";
+const EMBED = !!window.SNAKE_EMBED;
+if (EMBED) document.body.classList.add("embed");
+const $ = id => document.getElementById(id);
+const COLORS = ["#e4572e","#2e86ab","#8e44ad","#d99a0b","#1b998b","#d81159","#3d348b","#ff7f11","#0b7a75","#a23b4f"];
+const store = { get(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } }, set(k,v){ try{ localStorage.setItem(k,v); }catch(e){} } };
+const esc = s => { const d=document.createElement("div"); d.textContent=s; return d.innerHTML; };
+
+let W = 64, H = 36, TICK = 110;
+const snakes = new Map(), food = new Map();
+let myId = null, playing = false, lastTick = performance.now(), roomN = 1, online = 0, board = {today:[],all:[]}, tab = "today";
+let color = +(store.get("snakeColor") ?? (Math.random()*COLORS.length|0)); if(!(color>=0 && color<COLORS.length)) color = 0;
+const particles = []; let shake = 0;
+
+/* ---------- canvas ---------- */
+const cv = $("cv"), ctx = cv.getContext("2d");
+let CELL = 12, dpr = 1;
+const bgCanvas = document.createElement("canvas");
+function resize(){
+  const st = $("stage"), r = st.getBoundingClientRect();
+  const pad = EMBED ? 0 : 24;
+  const cw = r.width - pad, ch = r.height - pad;
+  CELL = Math.max(4, Math.floor(Math.min(cw/W, ch/H)));
+  dpr = Math.min(window.devicePixelRatio||1, 2);
+  cv.width = W*CELL*dpr; cv.height = H*CELL*dpr; cv.style.width = W*CELL+"px"; cv.style.height = H*CELL+"px";
+  bgCanvas.width = cv.width; bgCanvas.height = cv.height;
+  const b = bgCanvas.getContext("2d"); b.scale(dpr,dpr);
+  b.fillStyle = "#c5d19c"; b.fillRect(0,0,W*CELL,H*CELL);
+  b.fillStyle = "#b3c087";
+  const s = Math.max(1, CELL*.14);
+  for(let y=0;y<H;y++) for(let x=0;x<W;x++) b.fillRect(x*CELL+CELL/2-s/2, y*CELL+CELL/2-s/2, s, s);
+  b.strokeStyle = "#27321d"; b.lineWidth = 2; b.strokeRect(1,1,W*CELL-2,H*CELL-2);
+}
+addEventListener("resize", resize);
+
+/* ---------- sound ---------- */
+let ac = null, muted = store.get("snakeMuted")==="1";
+function audio(){ if(!ac){ try{ ac = new (window.AudioContext||window.webkitAudioContext)(); }catch(e){ return null; } } if(ac.state==="suspended") ac.resume().catch(()=>{}); return ac; }
+function blip(f0,f1,dur,vol,type="square",when=0){
+  if(muted) return; const c = audio(); if(!c) return; const t=c.currentTime+when;
+  const o=c.createOscillator(), g=c.createGain(); o.type=type; o.frequency.setValueAtTime(f0,t); o.frequency.exponentialRampToValueAtTime(f1,t+dur);
+  g.gain.setValueAtTime(vol,t); g.gain.exponentialRampToValueAtTime(.0005,t+dur); o.connect(g).connect(c.destination); o.start(t); o.stop(t+dur+.02);
+}
+const sfx = {
+  eat(){ blip(520,880,.07,.05); },
+  gold(){ [660,880,1100,1320].forEach((f,i)=>blip(f,f*1.01,.12,.05,"square",i*.06)); },
+  die(){ blip(300,60,.45,.08,"sawtooth"); },
+  kill(){ blip(200,700,.15,.06,"triangle"); },
+  start(){ blip(330,660,.12,.05,"triangle"); }
+};
+function setMuted(m){ muted=m; store.set("snakeMuted", m?"1":"0"); $("muteBtn").textContent = "Sound: "+(m?"off":"on"); }
+$("muteBtn").addEventListener("click", ()=>{ setMuted(!muted); audio(); });
+setMuted(muted);
+
+/* ---------- state from server ---------- */
+function setSnake(e){
+  const prev = snakes.get(e.i);
+  const s = prev || {};
+  Object.assign(s, {i:e.i, n:e.n, c:e.c, bot:!!e.bot, a:!!e.a, b:!!e.b, k:e.k||0, cells:e.cells.slice(), prevTail:null, grew:0});
+  if(prev && !prev.wasAlive && s.a && s.i===myId) sfx.start();
+  s.wasAlive = s.a;
+  snakes.set(e.i, s);
+}
+function burst(cells, col, n){
+  for(let i=0;i<cells.length;i+=Math.max(1,Math.floor(cells.length/n))){
+    const c = cells[i], x = c%W+.5, y = (c/W|0)+.5;
+    for(let k=0;k<3;k++) particles.push({x,y,vx:(Math.random()-.5)*14,vy:(Math.random()-.5)*14,life:.6+Math.random()*.4,col});
+  }
+}
+function applyFull(m){
+  snakes.clear(); food.clear();
+  for(const e of m.sn) setSnake(e);
+  for(let i=0;i<m.food.length;i+=2) food.set(m.food[i], m.food[i+1]);
+}
+function applyDelta(m){
+  for(const e of m.sn){
+    if(e.gone){ snakes.delete(e.i); continue; }
+    if(e.cells){ setSnake(e); continue; }
+    const s = snakes.get(e.i); if(!s) continue;
+    s.b = !!e.b; s.k = e.k;
+    if(s.a && !e.a){ burst(s.cells, COLORS[s.c], 24); if(s.i===myId){ shake=.35; } s.cells=[]; s.a=false; s.wasAlive=false; continue; }
+    s.a = !!e.a; if(!s.a) continue;
+    s.prevTail = null;
+    for(const c of e.add) s.cells.unshift(c);
+    if(e.cut>0){ const removed = s.cells.splice(s.cells.length-e.cut, e.cut); s.prevTail = removed[0]; }
+    s.moved = e.add.length>0;
+  }
+  for(let i=0;i<m.fr.length;i++){
+    const c = m.fr[i], t = food.get(c); food.delete(c);
+    const x=c%W+.5, y=(c/W|0)+.5;
+    for(let k=0;k<(t===2?14:5);k++) particles.push({x,y,vx:(Math.random()-.5)*8,vy:(Math.random()-.5)*8,life:.35+Math.random()*.3,col:t===2?"#f2c14e":"#b3261e"});
+    const me = snakes.get(myId);
+    if(me && me.a && me.cells[0]===c) (t===2?sfx.gold:sfx.eat)();
+  }
+  for(let i=0;i<m.fa.length;i+=2) food.set(m.fa[i], m.fa[i+1]);
+}
+
+/* ---------- feed / side panels ---------- */
+function feedLine(text){
+  const d = document.createElement("div"); d.textContent = text; $("feed").appendChild(d);
+  while($("feed").children.length>4) $("feed").firstChild.remove();
+  setTimeout(()=>{ d.style.opacity=0; setTimeout(()=>d.remove(),700); }, 5500);
+  const me = snakes.get(myId);
+  if(me && text.startsWith(me.n+" ate ")) sfx.kill();
+}
+function renderLive(){
+  const list = [...snakes.values()].filter(s=>s.a).sort((a,b)=>b.cells.length-a.cells.length).slice(0,10);
+  $("live").innerHTML = list.length ? list.map((s,i)=>`<div class="r"><span class="rk">${i+1}</span><span class="sw" style="background:${COLORS[s.c]}"></span><span class="nm${s.i===myId?" me":""}">${esc(s.n)}${s.bot?"<i>BOT</i>":""}${s.i===myId?"<i>YOU</i>":""}</span><span class="v">${s.cells.length}</span></div>`).join("") : `<div class="empty">Nobody is alive in this arena right now.</div>`;
+  $("arenaN").textContent = `#${roomN}`;
+}
+function renderBoard(){
+  const l = (board[tab]||[]);
+  const me = (store.get("snakeNick")||"").toLowerCase();
+  $("board").innerHTML = l.length ? l.map((r,i)=>`<div class="r"><span class="rk">${i+1}</span><span class="sw" style="background:${i===0?"#f2c14e":"#5b6a4b"}"></span><span class="nm${r.nick.toLowerCase()===me?" me":""}">${esc(r.nick)}</span><span class="v">${r.len}</span></div>`).join("") : `<div class="empty">No runs yet today. Grow past 6 to get on the board.</div>`;
+  const top = board.today[0];
+  $("topBest").innerHTML = top ? `today’s longest: <b>${top.len}</b> · ${esc(top.nick)}` : "";
+}
+document.addEventListener("click", e=>{ const b=e.target.closest("[data-tab]"); if(!b) return; tab=b.dataset.tab; document.querySelectorAll("[data-tab]").forEach(x=>x.classList.toggle("on",x===b)); renderBoard(); });
+
+/* ---------- network ---------- */
+let ws = null, retry = 800;
+function send(o){ if(ws && ws.readyState===1) ws.send(JSON.stringify(o)); }
+function connect(){
+  const url = (location.protocol==="https:"?"wss://":"ws://")+location.host+"/ws";
+  try{ ws = new WebSocket(url); }catch(e){ return; }
+  ws.onopen = ()=>{ retry = 800; };
+  ws.onmessage = ev=>{
+    let m; try{ m = JSON.parse(ev.data); }catch(e){ return; }
+    if(m.t==="s"){ applyDelta(m); lastTick = performance.now(); if(m.ev) m.ev.forEach(feedLine); online=m.on; }
+    else if(m.t==="f"){ applyFull(m); lastTick = performance.now(); if(m.ev) m.ev.forEach(feedLine); online=m.on; }
+    else if(m.t==="hi"){ myId=m.id; W=m.w; H=m.h; TICK=m.tick; roomN=m.room; board=m.board; applyFull(m); resize(); renderBoard(); if(playing) play(); }
+    else if(m.t==="spawned"){ myId = m.id; $("startOv").hidden = true; $("deadOv").hidden = true; }
+    else if(m.t==="dead") showDead(m);
+    else if(m.t==="board"){ board = m.board; renderBoard(); }
+    else if(m.t==="nick"){ store.set("snakeNick", m.nick); $("nick").value = m.nick; if(m.blocked) feedLine(`That nickname isn’t allowed. You’re ${m.nick}`); }
+    else if(m.t==="full"){ feedLine("Arena is crowded, trying again…"); setTimeout(play, 800); }
+  };
+  ws.onclose = ()=>{ $("online").textContent = "reconnecting…"; setTimeout(connect, retry); retry = Math.min(8000, retry*1.6); };
+}
+function play(){
+  const n = $("nick").value.trim();
+  if(n) store.set("snakeNick", n);
+  playing = true; lastDir = -1; audio();
+  send({t:"play", nick: n || store.get("snakeNick") || "", c: color});
+}
+function showDead(m){
+  playing = false; boostOn(false);
+  $("deadTitle").textContent = m.by ? `Eaten by ${m.by}` : m.how==="wall" ? "You hit the wall" : m.how==="self" ? "You bit your own tail" : "You crashed";
+  $("deadLen").textContent = m.len; $("deadKills").textContent = m.kills;
+  const nick = (store.get("snakeNick")||"").toLowerCase();
+  const idx = (board.today||[]).findIndex(r=>r.nick.toLowerCase()===nick);
+  $("deadRank").textContent = idx>=0 ? "#"+(idx+1) : "–";
+  setTimeout(()=>{ const i2=(board.today||[]).findIndex(r=>r.nick.toLowerCase()===nick); $("deadRank").textContent = i2>=0 ? "#"+(i2+1) : "–"; }, 900);
+  const origin = window.SNAKE_ORIGIN || location.origin;
+  const txt = m.by ? `I grew to ${m.len} in Snake Royale before ${m.by} ate me. Multiplayer snake you can play right in your timeline:` : `I grew to ${m.len} in Snake Royale. Multiplayer snake you can play right in your timeline:`;
+  $("shareBtn").href = "https://twitter.com/intent/tweet?text="+encodeURIComponent(txt)+"&url="+encodeURIComponent(origin);
+  setTimeout(()=>{ $("deadOv").hidden = false; $("againBtn").focus(); }, 650);
+  sfx.die();
+}
+
+/* ---------- input ---------- */
+let lastDir = -1, boosting = false;
+function turn(d){ const me = snakes.get(myId); if(!me || !me.a || d===lastDir) return; lastDir = d; send({t:"d", d}); }
+function boostOn(on){ if(on===boosting) return; boosting = on; send({t:"b", on}); }
+const KEYS = {ArrowUp:0,KeyW:0,ArrowRight:1,KeyD:1,ArrowDown:2,KeyS:2,ArrowLeft:3,KeyA:3};
+addEventListener("keydown", e=>{
+  if(e.target.tagName==="INPUT") return;
+  if(e.code in KEYS){ e.preventDefault(); turn(KEYS[e.code]); return; }
+  if(e.code==="Space"||e.code==="ShiftLeft"||e.code==="ShiftRight"){ e.preventDefault(); const me=snakes.get(myId); if(me&&me.a) boostOn(true); else if(!$("deadOv").hidden && e.code==="Space") play(); }
+  if(e.code==="Enter" && !$("deadOv").hidden){ e.preventDefault(); play(); }
+  if(e.code==="KeyM") setMuted(!muted);
+});
+addEventListener("keyup", e=>{ if(e.code==="Space"||e.code==="ShiftLeft"||e.code==="ShiftRight") boostOn(false); });
+addEventListener("blur", ()=>boostOn(false));
+// touch: swipe to turn, hold to boost
+let tStart = null, holdT = 0;
+cv.addEventListener("touchstart", e=>{ const t=e.changedTouches[0]; tStart={x:t.clientX,y:t.clientY}; clearTimeout(holdT); holdT=setTimeout(()=>boostOn(true),230); e.preventDefault(); }, {passive:false});
+cv.addEventListener("touchmove", e=>{
+  if(!tStart) return; const t=e.changedTouches[0], dx=t.clientX-tStart.x, dy=t.clientY-tStart.y;
+  if(Math.hypot(dx,dy)>18){ clearTimeout(holdT); turn(Math.abs(dx)>Math.abs(dy) ? (dx>0?1:3) : (dy>0?2:0)); tStart={x:t.clientX,y:t.clientY}; }
+  e.preventDefault();
+}, {passive:false});
+cv.addEventListener("touchend", ()=>{ clearTimeout(holdT); tStart=null; boostOn(false); });
+if(matchMedia("(pointer: coarse)").matches) $("ctrlHint").textContent = "Swipe to turn · hold to boost";
+
+$("startForm").addEventListener("submit", e=>{ e.preventDefault(); play(); });
+$("againBtn").addEventListener("click", play);
+$("nick").value = store.get("snakeNick") || "";
+$("fullLink").href = window.SNAKE_ORIGIN || "/";
+const sw = $("swatches");
+COLORS.forEach((c,i)=>{ const b=document.createElement("button"); b.type="button"; b.style.background=c; b.setAttribute("aria-label","Color "+(i+1)); if(i===color) b.classList.add("on");
+  b.addEventListener("click", ()=>{ color=i; store.set("snakeColor", i); sw.querySelectorAll("button").forEach(x=>x.classList.toggle("on", x===b)); }); sw.appendChild(b); });
+
+/* ---------- drawing ---------- */
+const lerp = (a,b,t)=>a+(b-a)*t;
+const cx = c => c%W, cy = c => c/W|0;
+function drawSnake(s, t, isMe){
+  const cells = s.cells; if(!cells.length) return;
+  const pts = [];
+  const h0 = cells[0], h1 = cells.length>1 ? cells[1] : h0;
+  if(s.moved && cells.length>1) pts.push([lerp(cx(h1),cx(h0),t), lerp(cy(h1),cy(h0),t)]); else pts.push([cx(h0),cy(h0)]);
+  for(let i=1;i<cells.length;i++) pts.push([cx(cells[i]), cy(cells[i])]);
+  if(s.prevTail!=null){ const last = cells[cells.length-1]; pts.push([lerp(cx(s.prevTail),cx(last),t), lerp(cy(s.prevTail),cy(last),t)]); }
+  const P = p => [(p[0]+.5)*CELL, (p[1]+.5)*CELL];
+  ctx.lineJoin = "round"; ctx.lineCap = "round";
+  const path = ()=>{ ctx.beginPath(); const a=P(pts[0]); ctx.moveTo(a[0],a[1]); for(let i=1;i<pts.length;i++){ const b=P(pts[i]); ctx.lineTo(b[0],b[1]); } };
+  if(pts.length===1) pts.push(pts[0]);
+  if(isMe){ path(); ctx.strokeStyle = "#f6f8ec"; ctx.lineWidth = CELL*1.02; ctx.stroke(); }
+  path(); ctx.strokeStyle = "#27321d"; ctx.lineWidth = CELL*.9; ctx.stroke();
+  path(); ctx.strokeStyle = COLORS[s.c]; ctx.lineWidth = CELL*.66; ctx.stroke();
+  // scale pattern
+  ctx.fillStyle = "rgba(255,255,255,.22)";
+  for(let i=2;i<pts.length-1;i+=2){ const p=P(pts[i]); ctx.fillRect(p[0]-CELL*.12, p[1]-CELL*.12, CELL*.24, CELL*.24); }
+  // head + eyes
+  const hp = P(pts[0]);
+  const d = cells.length>1 ? [cx(h0)-cx(h1), cy(h0)-cy(h1)] : [1,0];
+  ctx.fillStyle = COLORS[s.c]; ctx.strokeStyle = "#27321d"; ctx.lineWidth = Math.max(1, CELL*.12);
+  ctx.beginPath(); ctx.arc(hp[0], hp[1], CELL*.46, 0, Math.PI*2); ctx.fill(); ctx.stroke();
+  const px = -d[1], py = d[0];
+  for(const sgn of [-1,1]){
+    const ex = hp[0] + d[0]*CELL*.16 + px*sgn*CELL*.2, ey = hp[1] + d[1]*CELL*.16 + py*sgn*CELL*.2;
+    ctx.fillStyle = "#f6f8ec"; ctx.fillRect(ex-CELL*.12, ey-CELL*.12, CELL*.24, CELL*.24);
+    ctx.fillStyle = "#151a12"; ctx.fillRect(ex-CELL*.06+d[0]*CELL*.05, ey-CELL*.06+d[1]*CELL*.05, CELL*.12, CELL*.12);
+  }
+  if(s.b){ ctx.fillStyle = "rgba(39,50,29,.35)"; const tp=P(pts[pts.length-1]); for(let k=0;k<3;k++) ctx.fillRect(tp[0]+(Math.random()-.5)*CELL, tp[1]+(Math.random()-.5)*CELL, CELL*.2, CELL*.2); }
+  // name tag
+  const fs = Math.max(9, Math.min(13, CELL*.95));
+  ctx.font = `700 ${fs}px Silkscreen, monospace`; ctx.textAlign = "center"; ctx.textBaseline = "bottom";
+  const label = isMe ? "you" : s.n + (s.bot ? " ·bot" : "");
+  const tw = ctx.measureText(label).width + 8, ty = hp[1] - CELL*.65;
+  ctx.fillStyle = isMe ? "rgba(39,50,29,.9)" : "rgba(197,209,156,.8)"; ctx.fillRect(hp[0]-tw/2, ty-fs-2, tw, fs+3);
+  ctx.fillStyle = isMe ? "#f2c14e" : "#27321d"; ctx.fillText(label, hp[0], ty+1);
+}
+function drawFood(c, type, now){
+  const x = cx(c)*CELL, y = cy(c)*CELL;
+  if(type===2){
+    const p = 1 + Math.sin(now/150)*.12, r = CELL*.5*p;
+    ctx.fillStyle = "#f2c14e"; ctx.strokeStyle = "#27321d"; ctx.lineWidth = Math.max(1,CELL*.12);
+    ctx.beginPath(); ctx.arc(x+CELL/2, y+CELL/2, r, 0, Math.PI*2); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = "#fff6d0"; ctx.fillRect(x+CELL*.3, y+CELL*.28, CELL*.18, CELL*.18);
+  } else {
+    const i = CELL*.2;
+    ctx.fillStyle = "#27321d"; ctx.fillRect(x+i-1, y+i-1, CELL-2*i+2, CELL-2*i+2);
+    ctx.fillStyle = "#b3261e"; ctx.fillRect(x+i, y+i, CELL-2*i, CELL-2*i);
+    ctx.fillStyle = "#4f7a28"; ctx.fillRect(x+CELL*.5, y+i-CELL*.12, CELL*.16, CELL*.14);
+  }
+}
+let lastFrame = performance.now(), liveT = 0;
+function frame(now){
+  const dt = Math.min(.05, (now-lastFrame)/1000); lastFrame = now;
+  const t = Math.min(1, (now-lastTick)/TICK);
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  ctx.save();
+  if(shake>0){ shake = Math.max(0, shake-dt); ctx.translate((Math.random()-.5)*shake*24, (Math.random()-.5)*shake*24); }
+  ctx.drawImage(bgCanvas, 0, 0, W*CELL, H*CELL);
+  for(const [c,type] of food) drawFood(c, type, now);
+  for(const s of snakes.values()) if(s.a && s.i!==myId) drawSnake(s, t, false);
+  const me = snakes.get(myId); if(me && me.a) drawSnake(me, t, true);
+  for(let i=particles.length-1;i>=0;i--){ const p=particles[i]; p.life-=dt; if(p.life<=0){ particles.splice(i,1); continue; } p.x+=p.vx*dt; p.y+=p.vy*dt; p.vx*=.92; p.vy*=.92;
+    ctx.globalAlpha = Math.min(1,p.life*2); ctx.fillStyle = p.col; ctx.fillRect(p.x*CELL-CELL*.15, p.y*CELL-CELL*.15, CELL*.3, CELL*.3); }
+  ctx.globalAlpha = 1; ctx.restore();
+  // HUD
+  if(me && me.a){
+    const rank = [...snakes.values()].filter(s=>s.a).sort((a,b)=>b.cells.length-a.cells.length).indexOf(me)+1;
+    $("hudL").textContent = `LEN ${me.cells.length} · KILLS ${me.k} · #${rank} HERE`;
+  } else $("hudL").textContent = "";
+  $("online").textContent = `${online} online`;
+  $("hudOnline").textContent = EMBED ? `${online} online` : "";
+  liveT -= dt; if(liveT<=0){ liveT = .5; if(!EMBED) renderLive(); }
+  requestAnimationFrame(frame);
+}
+resize(); renderBoard(); connect(); requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
