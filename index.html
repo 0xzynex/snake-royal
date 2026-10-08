@@ -182,6 +182,7 @@ const esc = s => { const d=document.createElement("div"); d.textContent=s; retur
 
 let W = 64, H = 36, TICK = 110;
 const snakes = new Map(), food = new Map();
+let tickEst = 110, lastMsgAt = 0;
 let myId = null, playing = false, lastTick = performance.now(), roomN = 1, online = 0, board = {today:[],all:[]}, tab = "today";
 let color = +(store.get("snakeColor") ?? (Math.random()*COLORS.length|0)); if(!(color>=0 && color<COLORS.length)) color = 0;
 const particles = []; let shake = 0;
@@ -230,7 +231,14 @@ setMuted(muted);
 function setSnake(e){
   const prev = snakes.get(e.i);
   const s = prev || {};
-  Object.assign(s, {i:e.i, n:e.n, c:e.c, bot:!!e.bot, a:!!e.a, b:!!e.b, k:e.k||0, cells:e.cells.slice(), prevTail:null, grew:0});
+  let added = 0, removed = [];
+  if(prev && prev.a && e.a && prev.cells.length && e.cells.length){
+    const k = e.cells.indexOf(prev.cells[0]); if(k>0 && k<=2) added = k;
+    const now = new Set(e.cells);
+    for(let i=prev.cells.length-1;i>=0;i--){ if(!now.has(prev.cells[i])) removed.unshift(prev.cells[i]); else break; }
+    if(removed.length>2) removed = [];
+  }
+  Object.assign(s, {i:e.i, n:e.n, c:e.c, bot:!!e.bot, a:!!e.a, b:!!e.b, k:e.k||0, cells:e.cells.slice(), added, removed});
   if(prev && !prev.wasAlive && s.a && s.i===myId) sfx.start();
   s.wasAlive = s.a;
   snakes.set(e.i, s);
@@ -242,7 +250,9 @@ function burst(cells, col, n){
   }
 }
 function applyFull(m){
-  snakes.clear(); food.clear();
+  const keep = new Set(m.sn.map(e=>e.i));
+  for(const id of [...snakes.keys()]) if(!keep.has(id)) snakes.delete(id);
+  food.clear();
   for(const e of m.sn) setSnake(e);
   for(let i=0;i<m.food.length;i+=2) food.set(m.food[i], m.food[i+1]);
 }
@@ -256,10 +266,9 @@ function applyDelta(m){
     s.b = !!e.b; s.k = e.k;
     if(s.a && !e.a){ burst(s.cells, COLORS[s.c], 24); if(s.i===myId){ shake=.35; } s.cells=[]; s.a=false; s.wasAlive=false; continue; }
     s.a = !!e.a; if(!s.a) continue;
-    s.prevTail = null;
     for(const c of e.add) s.cells.unshift(c);
-    if(e.cut>0){ const removed = s.cells.splice(s.cells.length-e.cut, e.cut); s.prevTail = removed[0]; }
-    s.moved = e.add.length>0;
+    s.removed = e.cut>0 ? s.cells.splice(s.cells.length-e.cut, e.cut) : [];
+    s.added = e.add.length;
   }
   for(let i=0;i<m.fr.length;i++){
     const c = m.fr[i], t = food.get(c); food.delete(c);
@@ -302,7 +311,7 @@ function connect(){
   ws.onopen = ()=>{ retry = 800; };
   ws.onmessage = ev=>{
     let m; try{ m = JSON.parse(ev.data); }catch(e){ return; }
-    if(m.t==="s"){ applyDelta(m); lastTick = performance.now(); if(m.ev) m.ev.forEach(feedLine); online=m.on;
+    if(m.t==="s"){ applyDelta(m); { const nw = performance.now(); if(lastMsgAt) tickEst = tickEst*.85 + Math.min(250, Math.max(60, nw-lastMsgAt))*.15; lastMsgAt = nw; } lastTick = performance.now(); if(m.ev) m.ev.forEach(feedLine); online=m.on;
       const me = snakes.get(myId);
       if(!me || !me.a || serverDir(me)===pendingDir || performance.now()-pendingAt > 450) pendingDir = null; }
     else if(m.t==="p"){ rtt = Math.round(performance.now()-m.ts); }
@@ -388,22 +397,20 @@ const cx = c => c%W, cy = c => c/W|0;
 function drawSnake(s, t, isMe){
   const cells = s.cells; if(!cells.length) return;
   const pts = [];
-  const h0 = cells[0], h1 = cells.length>1 ? cells[1] : h0;
+  const h0 = cells[0], h1 = cells.length>1 ? cells[1] : h0, n = cells.length;
   let eyeDir = null;
-  const nd = isMe ? (pendingDir ?? serverDir(s)) : null;
-  const nx = nd!=null ? cx(h0)+DV[nd][0] : -1, ny = nd!=null ? cy(h0)+DV[nd][1] : -1;
-  if(isMe && nd!=null && nx>=0 && ny>=0 && nx<W && ny<H && cells.length>2){
-    // draw one step ahead in the direction you are steering
-    pts.push([lerp(cx(h0),nx,t), lerp(cy(h0),ny,t)]);
-    for(let i=0;i<cells.length-1;i++) pts.push([cx(cells[i]), cy(cells[i])]);
-    const a = cells[cells.length-1], b = cells[cells.length-2];
-    pts.push([lerp(cx(a),cx(b),t), lerp(cy(a),cy(b),t)]);
-    eyeDir = DV[nd];
-  } else {
-    if(s.moved && cells.length>1) pts.push([lerp(cx(h1),cx(h0),t), lerp(cy(h1),cy(h0),t)]); else pts.push([cx(h0),cy(h0)]);
-    for(let i=1;i<cells.length;i++) pts.push([cx(cells[i]), cy(cells[i])]);
-    if(s.prevTail!=null){ const last = cells[cells.length-1]; pts.push([lerp(cx(s.prevTail),cx(last),t), lerp(cy(s.prevTail),cy(last),t)]); }
-  }
+  const k = Math.min(s.added||0, n-1);
+  let from = 1;
+  if(k>0){ const f=t*k, seg=Math.min(k-1, Math.floor(f)), u=f-seg, a=cells[k-seg], b=cells[k-seg-1];
+    pts.push([lerp(cx(a),cx(b),u), lerp(cy(a),cy(b),u)]); from = k-seg; }
+  else pts.push([cx(h0),cy(h0)]);
+  for(let i=from;i<n;i++) pts.push([cx(cells[i]), cy(cells[i])]);
+  const rm = s.removed||[], m = rm.length;
+  if(m){ const rev=[cells[n-1], ...rm], f=t*m, seg=Math.min(m-1, Math.floor(f)), u=f-seg;
+    for(let j=1;j<=m-seg-1;j++) pts.push([cx(rev[j]), cy(rev[j])]);
+    const a=rev[m-seg], b=rev[m-seg-1]; pts.push([lerp(cx(a),cx(b),u), lerp(cy(a),cy(b),u)]); }
+  // your own input shows instantly: the eyes and the tip of the head lean where you steer
+  if(isMe && pendingDir!=null && pendingDir!==serverDir(s)){ eyeDir = DV[pendingDir]; pts[0] = [pts[0][0]+eyeDir[0]*.22, pts[0][1]+eyeDir[1]*.22]; }
   const P = p => [(p[0]+.5)*CELL, (p[1]+.5)*CELL];
   ctx.lineJoin = "round"; ctx.lineCap = "round";
   const path = ()=>{ ctx.beginPath(); const a=P(pts[0]); ctx.moveTo(a[0],a[1]); for(let i=1;i<pts.length;i++){ const b=P(pts[i]); ctx.lineTo(b[0],b[1]); } };
@@ -451,7 +458,7 @@ function drawFood(c, type, now){
 let lastFrame = performance.now(), liveT = 0;
 function frame(now){
   const dt = Math.min(.05, (now-lastFrame)/1000); lastFrame = now;
-  const t = Math.min(1, (now-lastTick)/TICK);
+  const t = Math.min(1, (now-lastTick)/tickEst);
   ctx.setTransform(dpr,0,0,dpr,0,0);
   ctx.save();
   if(shake>0){ shake = Math.max(0, shake-dt); ctx.translate((Math.random()-.5)*shake*24, (Math.random()-.5)*shake*24); }
