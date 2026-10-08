@@ -14,8 +14,10 @@ const KEY = "snake:board";
 
 const W = 64, H = 36;          // arena in cells (16:9)
 const TICK = 110;              // ms per step
-const ROOM_CAP = 28;           // humans per arena before a new arena opens
-const KEYFRAME = 45;           // full resync every N ticks
+const ROOM_CAP = 20;           // players per arena before a new arena opens
+const KEYFRAME = 90;           // full resync for players every N ticks
+const SPECTATE_EVERY = 9;      // people on the menu or death screen get a snapshot once a second
+const MAX_CONN = +(process.env.MAX_PLAYERS || 400); // protects a small server during a spike
 const DIRS = [[0, -1], [1, 0], [0, 1], [-1, 0]]; // up right down left
 const today = () => new Date().toISOString().slice(0, 10);
 const cell = (x, y) => y * W + x;
@@ -57,7 +59,7 @@ function submit(nick, len, kills) {
   const keys = Object.keys(board.days).sort(); while (keys.length > 14) delete board.days[keys.shift()];
   if (a || b) { scheduleSave(); boardDirty = true; }
 }
-let boardDirty = true;
+let boardDirty = true, boardTicks = 99;
 const publicBoard = () => ({
   today: (board.days[today()] || []).slice(0, 10).map(({ nick, len, kills }) => ({ nick, len, kills })),
   all: board.all.slice(0, 10).map(({ nick, len, kills }) => ({ nick, len, kills })),
@@ -80,7 +82,6 @@ function cleanNick(raw) {
 }
 
 /* ---------------- arena ---------------- */
-const BOT_NAMES = ["Noodle", "Slinky", "Wiggles", "Sir Hiss", "Pretzel", "Spaghetto", "Zigzag", "Mr Danger", "Linguine", "Sssteve"];
 const COLORS = 10;
 let nextId = 1;
 
@@ -134,40 +135,10 @@ class Room {
     else this.ev(how === "wall" ? `${s.nick} hit the wall` : how === "self" ? `${s.nick} bit their own tail` : `${s.nick} crashed`);
     if (!s.bot) { submit(s.nick, s.best, s.kills); if (s.ws) send(s.ws, { t: "dead", len: s.best, kills: s.kills, by: killer && killer !== s ? killer.nick : null, how }); }
   }
-  botThink(s, occ) {
-    const h = s.body[0], hx = h % W, hy = h / W | 0;
-    let target = null, td = 1e9;
-    for (const [c, t] of this.food) { const d = Math.abs(c % W - hx) + Math.abs((c / W | 0) - hy) - (t === 2 ? 12 : 0); if (d < td) { td = d; target = c; } }
-    let best = s.dir, bs = -1e9;
-    for (let d = 0; d < 4; d++) {
-      if ((d + 2) % 4 === s.dir) continue;
-      const nx = hx + DIRS[d][0], ny = hy + DIRS[d][1];
-      if (nx < 0 || ny < 0 || nx >= W || ny >= H || occ.has(cell(nx, ny))) continue;
-      let score = 0;
-      if (target !== null) score -= Math.abs(target % W - nx) + Math.abs((target / W | 0) - ny);
-      // flood fill a little to avoid boxing itself in
-      const seen = new Set([cell(nx, ny)]), q = [cell(nx, ny)]; let room = 0;
-      while (q.length && room < 40) { const c = q.shift(); room++; const x = c % W, y = c / W | 0;
-        for (const [ax, ay] of DIRS) { const X = x + ax, Y = y + ay, C = cell(X, Y); if (X < 0 || Y < 0 || X >= W || Y >= H || seen.has(C) || occ.has(C)) continue; seen.add(C); q.push(C); } }
-      if (room < Math.min(40, s.body.length + 4)) score -= 200;
-      score += Math.random() * 1.5 + (d === s.dir ? .8 : 0);
-      if (score > bs) { bs = score; best = d; }
-    }
-    if (best !== s.dir) s.queue = [best];
-    s.boost = s.body.length > 12 && Math.random() < .02 ? true : (s.boost && Math.random() < .9);
-  }
   step() {
     this.k++;
     const now = Date.now();
-    // bots: keep the arena lively when few people are around
-    const humans = this.humans(), want = Math.max(2, 6 - humans);
-    let bots = 0; for (const s of this.snakes.values()) if (s.bot) bots++;
-    if (bots < want) { const s = { id: nextId++, nick: BOT_NAMES[Math.random() * BOT_NAMES.length | 0], color: Math.random() * COLORS | 0, bot: true }; if (this.spawn(s)) this.snakes.set(s.id, s); }
-    for (const s of this.snakes.values()) {
-      if (s.bot && !s.alive && now - s.deadAt > 2500) { if (bots > want) { this.snakes.delete(s.id); this.gone.push(s.id); bots--; } else this.spawn(s); }
-    }
-    let occ = this.occupied();
-    for (const s of this.snakes.values()) if (s.bot && s.alive) this.botThink(s, occ);
+    let occ;
     for (const s of this.snakes.values()) { s.add = s.add || []; }
     // two sub-steps: everyone moves once, boosting snakes move twice
     for (let sub = 0; sub < 2; sub++) {
@@ -213,24 +184,31 @@ class Room {
     this.broadcast();
   }
   snakeFull(s) { return { i: s.id, n: s.nick, c: s.color, bot: s.bot ? 1 : 0, a: s.alive ? 1 : 0, b: s.boost ? 1 : 0, k: s.kills, cells: s.alive ? s.body : [] }; }
+  fullMsg() {
+    return { t: "f", k: this.k, sn: [...this.snakes.values()].filter(s => s.body).map(s => this.snakeFull(s)), food: [...this.food].flat(), on: onlineCount };
+  }
   broadcast() {
-    let msg;
-    if (this.k % KEYFRAME === 0) {
-      msg = { t: "f", k: this.k, sn: [...this.snakes.values()].filter(s => s.body).map(s => this.snakeFull(s)), food: [...this.food].flat() };
-    } else {
-      const sn = [];
-      for (const s of this.snakes.values()) {
-        if (!s.body) continue;
-        if (s.spawned) sn.push(this.snakeFull(s));
-        else sn.push({ i: s.id, a: s.alive ? 1 : 0, b: s.boost ? 1 : 0, k: s.kills, add: s.alive ? s.add : [], cut: s.alive ? s.cut : 0 });
-      }
-      for (const id of this.gone) sn.push({ i: id, gone: 1 });
-      msg = { t: "s", k: this.k, sn, fa: this.foodAdd, fr: this.foodDel };
+    // compact delta: flat numbers per snake [id, flags(alive|boost<<1), kills, cut, nAdd, ...added cells]
+    const d = [], fu = [];
+    for (const s of this.snakes.values()) {
+      if (!s.body) continue;
+      if (s.spawned) { fu.push(this.snakeFull(s)); continue; }
+      const add = s.alive ? s.add : [];
+      d.push(s.id, (s.alive ? 1 : 0) | (s.boost ? 2 : 0), s.kills, s.alive ? s.cut : 0, add.length, ...add);
     }
-    if (this.events.length) msg.ev = this.events;
-    msg.on = onlineCount;
-    const str = JSON.stringify(msg);
-    for (const ws of this.clients) if (ws.readyState === 1) ws.send(str);
+    const delta = { t: "s", k: this.k, d, fa: this.foodAdd, fr: this.foodDel, on: onlineCount };
+    if (fu.length) delta.fu = fu;
+    if (this.gone.length) delta.g = this.gone;
+    if (this.events.length) delta.ev = this.events;
+    const keyframe = this.k % KEYFRAME === 0;
+    let full = null, spec = null;
+    if (keyframe || this.k % SPECTATE_EVERY === 0) { full = this.fullMsg(); if (this.events.length) full.ev = this.events; full = JSON.stringify(full); }
+    const str = keyframe ? full : JSON.stringify(delta);
+    for (const ws of this.clients) {
+      if (ws.readyState !== 1) continue;
+      if (ws.me && ws.me.alive) ws.send(str);
+      else if (full) ws.send(full);
+    }
     for (const s of this.snakes.values()) { s.spawned = false; s.add = []; s.cut = 0; }
     this.events = []; this.foodAdd = []; this.foodDel = []; this.gone = [];
   }
@@ -251,7 +229,7 @@ function render(req, embed) {
   const origin = `${proto}://${req.headers.host}`;
   const largeCard = new URL(req.url, "http://x").pathname === "/play";
   const meta = `
-<meta name="description" content="Multiplayer snake. Everyone online shares one arena. Eat, grow, cut people off. Plays right inside your timeline.">
+<meta name="description" content="Multiplayer snake. Everyone online plays together, up to 20 per arena. Eat, grow, cut people off. Plays right inside your timeline.">
 <meta property="og:type" content="website">
 <meta property="og:title" content="Snake Royale">
 <meta property="og:description" content="Multiplayer snake. Everyone online shares one arena. Eat, grow, cut people off.">
@@ -292,6 +270,8 @@ wss.on("connection", ws => {
   const room = pickRoom();
   room.clients.add(ws);
   const me = { id: nextId++, nick: randomNick(), color: Math.random() * COLORS | 0, bot: false, ws, alive: false, body: null, queue: [] };
+  ws.me = me;
+  if (onlineCount > MAX_CONN) { send(ws, { t: "busy" }); setTimeout(() => ws.close(), 200); }
   let msgs = 0, alive = true;
   const reset = setInterval(() => { msgs = 0; }, 1000);
   send(ws, { t: "hi", id: me.id, w: W, h: H, tick: TICK, room: room.n, board: publicBoard(),
@@ -305,7 +285,7 @@ wss.on("connection", ws => {
       const r = cleanNick(m.nick); me.nick = r.nick;
       if (r.blocked || r.nick !== String(m.nick || "").trim()) send(ws, { t: "nick", nick: r.nick, blocked: r.blocked });
       if (Number.isInteger(m.c) && m.c >= 0 && m.c < COLORS) me.color = m.c;
-      if (room.spawn(me)) { room.snakes.set(me.id, me); send(ws, { t: "spawned", id: me.id }); }
+      if (room.spawn(me)) { room.snakes.set(me.id, me); send(ws, room.fullMsg()); send(ws, { t: "spawned", id: me.id }); }
       else send(ws, { t: "full" });
     } else if (m.t === "d" && me.alive) {
       const d = m.d | 0; if (d >= 0 && d < 4 && me.queue.length < 3) me.queue.push(d);
@@ -322,7 +302,8 @@ wss.on("connection", ws => {
 
 setInterval(() => {
   for (const r of rooms) if (r.clients.size) r.step();
-  if (boardDirty) {
+  if (boardDirty && ++boardTicks >= 27) { // at most every ~3 seconds
+    boardTicks = 0;
     boardDirty = false; const s = JSON.stringify({ t: "board", board: publicBoard() });
     for (const ws of wss.clients) if (ws.readyState === 1) ws.send(s);
   }
