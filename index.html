@@ -124,16 +124,16 @@ body:not(.embed) .embedOnly{display:none}
       <div id="feed"></div>
 
       <div class="ov" id="startOv">
-        <form class="box" id="startForm">
+        <div class="box" id="startForm">
           <h1>Snake Royale</h1>
           <p>Everyone online plays together, up to 20 per arena. Eat to grow. Make other snakes crash into you. Longest snake of the day tops the board.</p>
           <div class="row">
             <input id="nick" maxlength="14" placeholder="nickname" autocomplete="off" spellcheck="false" aria-label="Nickname">
-            <button class="go" type="submit">Play</button>
+            <button class="go" type="button" id="playBtn">Play</button>
           </div>
           <div class="swatches" id="swatches" aria-label="Snake color"></div>
           <p class="small" id="ctrlHint">Arrows or WASD to turn · hold Space to boost</p>
-        </form>
+        </div>
       </div>
 
       <div class="ov" id="deadOv" hidden>
@@ -383,7 +383,9 @@ cv.addEventListener("touchmove", e=>{
 cv.addEventListener("touchend", ()=>{ clearTimeout(holdT); tStart=null; boostOn(false); });
 if(matchMedia("(pointer: coarse)").matches) $("ctrlHint").textContent = "Swipe to turn · hold to boost";
 
-$("startForm").addEventListener("submit", e=>{ e.preventDefault(); play(); });
+// No <form> submit: X runs the game in a sandboxed frame where form submission is blocked.
+$("playBtn").addEventListener("click", ()=>{ play(); try{ window.focus(); }catch(e){} });
+$("nick").addEventListener("keydown", e=>{ if(e.key==="Enter"){ e.preventDefault(); play(); } });
 $("againBtn").addEventListener("click", play);
 $("nick").value = store.get("snakeNick") || "";
 $("fullLink").href = window.SNAKE_ORIGIN || "/";
